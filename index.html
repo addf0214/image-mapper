@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Image Mapper</title>
+  <link rel="stylesheet" href="node_modules/leaflet/dist/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+  <script defer src="node_modules/leaflet/dist/leaflet.js"></script>
+  <script defer src="renderer.js"></script>
+</head>
+<body>
+  <main>
+    <header><h1>Image Mapper</h1><p>给 ARW / JPEG 补充位置与拍摄时区</p></header>
+    <fieldset id="controls">
+      <section class="panel">
+        <div class="row"><button id="photos" type="button">选择照片</button><strong id="photo-count">未选择照片</strong></div>
+        <ul id="photo-list" class="file-list"></ul>
+        <label class="row">相机时区 <input id="zone" list="zones" placeholder="例如 Asia/Tokyo" autocomplete="off" required></label>
+        <datalist id="zones"><option value="Asia/Tokyo"><option value="Asia/Shanghai"><option value="Asia/Taipei"><option value="Europe/Berlin"><option value="Europe/London"><option value="America/New_York"><option value="America/Los_Angeles"><option value="Australia/Sydney"><option value="UTC"></datalist>
+        <p class="hint">按相机当时的墙上时间解释，保留原小时与亚秒；跨时区照片请分批选择。</p>
+        <label><input id="overwrite" type="checkbox"> 覆盖已有位置（默认跳过已有 GPS）</label>
+      </section>
+      <section class="panel">
+        <div class="mode-row"><label><input name="mode" type="radio" value="gpx" checked> PixTrack GPX 定位</label><label><input name="mode" type="radio" value="manual"> 批量手动定位</label></div>
+        <div id="gpx-panel"><div class="row"><button id="gpx" type="button">选择 GPX</button><span id="gpx-name">未选择轨迹</span></div><p class="hint">仅匹配同一连续段内、相邻点间隔不超过 120 秒的时间。超出范围或夏令时歧义会跳过。</p></div>
+        <div id="manual-panel" hidden>
+          <div class="row"><input id="query" placeholder="搜索城市、地标或地址" aria-label="地点名称"><button id="search" type="button">搜索地点</button></div>
+          <p class="hint">OpenStreetMap / Nominatim · 需联网。仅点击搜索后请求，不自动补全；请勿输入个人或保密信息。<a href="https://operations.osmfoundation.org/policies/nominatim/" target="_blank" rel="noreferrer">使用政策</a></p>
+          <div id="search-results"></div>
+          <p id="map-message" class="hint" role="status">点击地图选点，拖动标记微调位置。</p>
+          <div id="map"></div>
+          <div class="row coordinate-row"><label>纬度 <input id="lat" type="number" min="-90" max="90" step="any" placeholder="WGS84"></label><label>经度 <input id="lon" type="number" min="-180" max="180" step="any" placeholder="WGS84"></label><button id="set-point" type="button">使用坐标</button></div>
+          <p id="chosen-point" class="hint">尚未指定地点。经纬度补充输入只接受 WGS84。</p>
+        </div>
+      </section>
+      <div class="row action-row"><button id="run" type="button" class="primary">写入所选原文件</button><span class="hint">直接修改，不保留整份照片备份。</span></div>
+    </fieldset>
+    <section class="panel results-panel" aria-live="polite"><p id="status">准备就绪</p><progress id="progress" value="0" max="1" hidden></progress><p id="summary"></p><ul id="results"></ul></section>
+  </main>
+</body>
+</html>

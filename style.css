@@ -1,0 +1,40 @@
+:root { color-scheme: light; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: #22312d; background: #f3f5f3; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { max-width: 1000px; margin: auto; padding: 24px 30px; }
+header { margin-bottom: 22px; }
+h1 { font-size: 28px; letter-spacing: -.8px; margin: 0 0 5px; }
+header p { color: #65736c; margin: 0; }
+fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.panel { background: white; border: 1px solid #dce3df; border-radius: 10px; padding: 19px 22px; margin-bottom: 16px; }
+.row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.mode-row { display: flex; gap: 30px; margin-bottom: 20px; }
+button, input { font: inherit; }
+button { border: 1px solid #b7c7be; color: #244b39; background: #f4f8f5; border-radius: 6px; padding: 9px 15px; cursor: pointer; }
+button:hover { background: #e7efe9; }
+button:disabled { opacity: .5; cursor: default; }
+input:not([type="checkbox"]):not([type="radio"]) { border: 1px solid #b7c7be; background: white; padding: 9px 10px; border-radius: 5px; min-width: 150px; }
+input[type="checkbox"], input[type="radio"] { accent-color: #2d654d; }
+#zone { width: 280px; }
+#query { flex: 1; }
+.hint { font-size: 13px; color: #65736c; line-height: 1.7; }
+a { color: #2d654d; }
+.file-list { padding-left: 20px; max-height: 110px; overflow: auto; font-size: 13px; margin: 12px 0; }
+.file-list:empty { display: none; }
+.primary { color: white; background: #2d654d; border-color: #2d654d; font-weight: 600; }
+.primary:hover { background: #214e3a; }
+.action-row { margin: 8px 0 20px; }
+#map { height: 340px; border: 1px solid #dce3df; border-radius: 6px; }
+.coordinate-row { margin-top: 15px; }
+.coordinate-row input { width: 180px; }
+#search-results { display: grid; gap: 5px; margin-top: 10px; }
+#search-results button { text-align: left; font-size: 13px; }
+#status { margin: 0; }
+#progress { width: 100%; margin-top: 12px; accent-color: #2d654d; }
+#summary:empty { display: none; }
+#results { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow: auto; }
+#results li { border-top: 1px solid #e6ebe7; padding: 10px 0; font-size: 13px; overflow-wrap: anywhere; }
+.success { color: #286344; }
+.skipped { color: #80621e; }
+.failed, .error { color: #aa3232; }
+[hidden] { display: none !important; }
