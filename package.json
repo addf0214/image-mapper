@@ -4,12 +4,17 @@
   "private": true,
   "description": "Windows 本地照片定位工具",
   "main": "main.js",
-  "scripts": { "start": "electron ." },
+  "scripts": {
+    "start": "electron ."
+  },
   "dependencies": {
     "@js-temporal/polyfill": "0.5.1",
     "exiftool-vendored.exe": "13.59.3",
     "fast-xml-parser": "5.11.2",
+    "geo-tz": "8.1.9",
     "leaflet": "1.9.4"
   },
-  "devDependencies": { "electron": "44.5.1" }
+  "devDependencies": {
+    "electron": "44.5.1"
+  }
 }

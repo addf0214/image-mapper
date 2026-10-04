@@ -1,7 +1,9 @@
-const { app, BrowserWindow, dialog, ipcMain, net, session, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, net, session, shell, nativeImage } = require('electron');
 const path = require('node:path');
+const fs = require('node:fs/promises');
+const { randomUUID } = require('node:crypto');
 const { pathToFileURL } = require('node:url');
-const { runBatch } = require('./metadata');
+const { runBatch, exiftool } = require('./metadata');
 const { coordinates } = require('./location');
 
 const pageUrl = pathToFileURL(path.join(__dirname, 'index.html')).href;
@@ -10,6 +12,8 @@ const searchUrl = process.env.IMAGE_MAPPER_SEARCH_URL || 'https://nominatim.open
 const userAgent = 'ImageMapper/1.0 (personal Windows photo geotagging)';
 let window, photos = [], gpxPath = null, busy = false, searching = false, lastSearch = 0;
 const searchCache = new Map();
+const pendingChoices = new Map();
+const photoList = () => photos.map(({ id, file }) => ({ id, name: path.basename(file) }));
 
 function handle(name, action) {
   ipcMain.handle(name, async (event, ...args) => {
@@ -27,8 +31,32 @@ handle('select-photos', async () => {
     title: '选择要直接修改的照片', properties: ['openFile', 'multiSelections'],
     filters: [{ name: 'Sony ARW / JPEG', extensions: ['arw', 'jpg', 'jpeg'] }]
   });
-  if (!result.canceled) photos = [...new Set(result.filePaths)];
-  return photos.map(file => path.basename(file));
+  if (!result.canceled) {
+    for (const file of result.filePaths) {
+      if (!photos.some(photo => photo.file === file)) photos.push({ id: randomUUID(), file });
+    }
+  }
+  return photoList();
+});
+
+handle('remove-photo', id => {
+  if (busy) throw new Error('正在处理照片，请等待完成。');
+  photos = photos.filter(photo => photo.id !== id);
+  pendingChoices.delete(id);
+  return photoList();
+});
+
+handle('photo-thumbnail', async id => {
+  const photo = photos.find(photo => photo.id === id);
+  if (!photo) throw new Error('照片已移出选择。');
+  const buffer = /\.arw$/i.test(photo.file)
+    ? (await exiftool(['-b', '-PreviewImage', photo.file], true)).stdout
+    : await fs.readFile(photo.file);
+  const image = nativeImage.createFromBuffer(buffer);
+  if (image.isEmpty()) throw new Error('无法读取缩略图；ARW 需要内嵌 PreviewImage。');
+  const size = image.getSize();
+  const scale = Math.min(1, 320 / size.width, 240 / size.height);
+  return image.resize({ width: Math.max(1, Math.round(size.width * scale)), height: Math.max(1, Math.round(size.height * scale)) }).toDataURL();
 });
 
 handle('select-gpx', async () => {
@@ -68,10 +96,30 @@ handle('search-place', async query => {
 handle('run-batch', async options => {
   if (busy) throw new Error('已有任务正在执行。');
   busy = true;
+  pendingChoices.clear();
   try {
-    return await runBatch({ files: [...photos], gpxPath, mode: options.mode, zone: options.zone?.trim(), overwrite: Boolean(options.overwrite), position: options.position }, progress => {
+    const selected = [...photos];
+    const context = { gpxPath, mode: options.mode, position: options.position };
+    const output = await runBatch({ files: selected.map(photo => photo.file), ...context }, progress => {
+      const photo = selected[progress.completed - 1];
+      progress.result.id = photo.id;
+      if (progress.result.choices) pendingChoices.set(photo.id, { file: photo.file, context, choices: progress.result.choices });
       if (!window.isDestroyed()) window.webContents.send('batch-progress', progress);
     });
+    return output;
+  } finally { busy = false; }
+});
+
+handle('resolve-choice', async ({ id, index }) => {
+  if (busy) throw new Error('已有任务正在执行。');
+  const pending = pendingChoices.get(id);
+  if (!pending || !photos.some(photo => photo.id === id) || !Number.isInteger(index) || !pending.choices[index]) throw new Error('该匹配选择已不可用。');
+  busy = true;
+  try {
+    const output = await runBatch({ files: [pending.file], ...pending.context, selectedChoice: pending.choices[index] });
+    const result = { ...output.results[0], id };
+    pendingChoices.delete(id);
+    return result;
   } finally { busy = false; }
 });
 
@@ -82,7 +130,7 @@ app.whenReady().then(() => {
     callback({ requestHeaders: details.requestHeaders });
   });
   window = new BrowserWindow({
-    width: 1060, height: 850, minWidth: 820, minHeight: 650,
+    width: 1160, height: 900, minWidth: 820, minHeight: 650,
     title: 'Image Mapper', autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true }
   });

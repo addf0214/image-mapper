@@ -1,40 +1,41 @@
 const { Temporal } = require('@js-temporal/polyfill');
 const { XMLParser, XMLValidator } = require('fast-xml-parser');
+const { find: findZones } = require('geo-tz/all');
 
 const MAX_GAP_SECONDS = 120;
 
-function validateZone(zone) {
-  if (typeof zone !== 'string' || !zone.trim() || /^[+-]/.test(zone)) {
-    throw new Error('请明确填写相机使用的 IANA 时区，例如 Asia/Tokyo。');
-  }
-  try {
-    Temporal.Instant.from('2000-01-01T00:00:00Z').toZonedDateTimeISO(zone);
-  } catch {
-    throw new Error(`无效的相机时区：${zone}`);
-  }
-}
-
-function photoTime(tags, zone) {
+function photoWallTime(tags) {
   const raw = tags['ExifIFD:DateTimeOriginal'];
   const match = typeof raw === 'string' && raw.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
   if (!match) throw new Error('缺少有效的 EXIF 拍摄时间 DateTimeOriginal。');
   const fraction = String(tags['ExifIFD:SubSecTimeOriginal'] ?? '').trim();
   if (fraction && !/^\d{1,9}$/.test(fraction)) throw new Error('拍摄亚秒格式无效（支持 1–9 位）。');
   const [, y, m, d, h, min, s] = match;
-  let plain;
   try {
-    plain = Temporal.PlainDateTime.from(`${y}-${m}-${d}T${h}:${min}:${s}${fraction ? '.' + fraction : ''}`, { overflow: 'reject' });
+    return Temporal.PlainDateTime.from(`${y}-${m}-${d}T${h}:${min}:${s}${fraction ? '.' + fraction : ''}`, { overflow: 'reject' });
   } catch {
     throw new Error('拍摄时间的日期或时分秒无效。');
   }
-  let zoned;
-  try {
-    zoned = plain.toZonedDateTime(zone, { disambiguation: 'reject' });
-  } catch {
-    throw new Error('拍摄墙上时间在该时区重复或不存在（夏令时切换），已跳过。');
+}
+
+function timesInZone(plain, zone) {
+  const candidates = [];
+  for (const disambiguation of ['earlier', 'later']) {
+    const zoned = plain.toZonedDateTime(zone, { disambiguation });
+    // A DST gap has no instant with the original wall time. A fold has two.
+    if (!zoned.toPlainDateTime().equals(plain)) continue;
+    if (!/^[+-]\d{2}:\d{2}$/.test(zoned.offset)) throw new Error('该历史时区偏移精度无法用 EXIF 时区字段表示。');
+    if (!candidates.some(time => time.ns === zoned.epochNanoseconds)) {
+      candidates.push({ ns: zoned.epochNanoseconds, offset: zoned.offset, utc: zoned.toInstant().toString(), zone });
+    }
   }
-  if (!/^[+-]\d{2}:\d{2}$/.test(zoned.offset)) throw new Error('该历史时区偏移精度无法用 EXIF 时区字段表示。');
-  return { ns: zoned.epochNanoseconds, offset: zoned.offset, utc: zoned.toInstant().toString() };
+  return candidates;
+}
+
+function zonesAt(position) {
+  const zones = findZones(position.lat, position.lon);
+  if (!zones.length) throw new Error('无法确定该地点的时区。');
+  return zones;
 }
 
 function coordinates(lat, lon) {
@@ -78,10 +79,11 @@ function parseGpx(xml) {
     }
   }
   if (!segments.length) throw new Error('GPX 没有带有效时间的轨迹点（仅支持 trk/trkseg）。');
-  return { segments, missingTimes, pointCount: segments.reduce((n, s) => n + s.length, 0) };
+  const zones = [...new Set(segments.flatMap(segment => segment.flatMap(zonesAt)))];
+  return { segments, zones, missingTimes, pointCount: segments.reduce((n, s) => n + s.length, 0) };
 }
 
-function matchGpx(track, ns) {
+function positionsAt(track, ns) {
   const matches = [];
   for (const segment of track.segments) {
     if (ns < segment[0].ns || ns > segment[segment.length - 1].ns) continue;
@@ -103,11 +105,25 @@ function matchGpx(track, ns) {
     const lon = ((a.lon + delta * ratio + 540) % 360) - 180;
     matches.push({ lat: a.lat + (b.lat - a.lat) * ratio, lon });
   }
-  if (!matches.length) throw new Error(`无法匹配：超出轨迹、位于分段断点或记录间隔超过 ${MAX_GAP_SECONDS} 秒。`);
-  if (matches.some(p => Math.abs(p.lat - matches[0].lat) > 1e-9 || Math.abs(p.lon - matches[0].lon) > 1e-9)) {
-    throw new Error('多个重叠轨迹段给出不同位置，无法唯一匹配。');
-  }
-  return matches[0];
+  return matches;
 }
 
-module.exports = { validateZone, photoTime, coordinates, parseGpx, matchGpx, MAX_GAP_SECONDS };
+function locatePhoto(tags, track, position) {
+  const plain = photoWallTime(tags);
+  const matches = [];
+  for (const zone of track ? track.zones : zonesAt(position)) {
+    for (const time of timesInZone(plain, zone)) {
+      for (const target of track ? positionsAt(track, time.ns) : [position]) {
+        if (track && !zonesAt(target).includes(zone)) continue;
+        if (matches.some(match => match.time.ns === time.ns && Math.abs(match.position.lat - target.lat) < 1e-9 && Math.abs(match.position.lon - target.lon) < 1e-9)) continue;
+        matches.push({ position: target, time });
+      }
+    }
+  }
+  if (!matches.length) throw new Error(track
+    ? `无法匹配：当地拍摄时间不在连续轨迹内、间隔超过 ${MAX_GAP_SECONDS} 秒，或当地时间不存在。`
+    : '拍摄墙上时间在该地点不存在（夏令时跳时），已跳过。');
+  return matches;
+}
+
+module.exports = { coordinates, parseGpx, locatePhoto };

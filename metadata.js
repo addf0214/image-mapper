@@ -2,24 +2,26 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const exiftoolPath = require('exiftool-vendored.exe');
-const { validateZone, photoTime, coordinates, parseGpx, matchGpx } = require('./location');
+const { coordinates, parseGpx, locatePhoto } = require('./location');
 
-function exiftool(args) {
+function exiftool(args, binary = false) {
   return new Promise((resolve, reject) => {
     // UTF-8 argument file avoids Windows command-line code-page conversion.
     const child = spawn(exiftoolPath, ['-charset', 'filename=UTF8', '-@', '-'], {
       windowsHide: true, shell: false,
       env: { ...process.env, LC_ALL: 'C', LC_CTYPE: 'C', LANG: 'C' }
     });
-    let stdout = '', stderr = '';
-    child.stdout.setEncoding('utf8');
+    const chunks = [];
+    let stderr = '';
     child.stderr.setEncoding('utf8');
-    child.stdout.on('data', data => { stdout += data; });
+    child.stdout.on('data', data => { chunks.push(data); });
     child.stderr.on('data', data => { stderr += data; });
     child.on('error', error => reject(new Error(`无法启动 ExifTool：${error.message}`)));
     child.stdin.on('error', error => reject(new Error(`ExifTool 输入失败：${error.message}`)));
     child.on('close', code => {
-      if (code !== 0 || /(^|\n)Error:/i.test(stderr)) reject(new Error(stderr.trim() || stdout.trim() || `ExifTool 退出码 ${code}`));
+      const buffer = Buffer.concat(chunks);
+      const stdout = binary ? buffer : buffer.toString('utf8');
+      if (code !== 0 || /(^|\n)Error:/i.test(stderr)) reject(new Error(stderr.trim() || buffer.toString('utf8').trim() || `ExifTool 退出码 ${code}`));
       else resolve({ stdout, warning: stderr.trim() });
     });
     if (args.some(arg => /[\r\n]/.test(arg))) {
@@ -32,7 +34,7 @@ function exiftool(args) {
 }
 
 async function readMetadata(file) {
-  const { stdout, warning } = await exiftool(['-j', '-G1', '-n', '-api', 'StructFormat=JSONQ', '-EXIF:DateTimeOriginal', '-EXIF:SubSecTimeOriginal', '-EXIF:OffsetTimeOriginal', '-GPS:all', '-XMP-exif:GPS*', file]);
+  const { stdout, warning } = await exiftool(['-j', '-G1', '-n', '-api', 'StructFormat=JSONQ', '-EXIF:DateTimeOriginal', '-EXIF:SubSecTimeOriginal', '-GPS:all', '-XMP-exif:GPS*', file]);
   const tags = JSON.parse(stdout)[0];
   if (!tags || tags.Error) throw new Error(tags?.Error || 'ExifTool 未返回照片元数据。');
   return { tags, warning };
@@ -45,8 +47,7 @@ function hasGps(tags) {
 async function writeMetadata(file, position, time, mode) {
   const args = [
     '-overwrite_original_in_place', '-P',
-    // Replace the GPS block and XMP GPS tags: old altitude, accuracy, speed,
-    // direction and timestamps must not describe the newly assigned location.
+    // Remove incomplete GPS remnants before assigning the first location.
     '-GPS:all=', '-XMP-exif:GPS*=',
     `-EXIF:GPSLatitude=${Math.abs(position.lat)}`,
     `-EXIF:GPSLatitudeRef=${position.lat < 0 ? 'S' : 'N'}`,
@@ -66,8 +67,7 @@ async function writeMetadata(file, position, time, mode) {
   return output.warning;
 }
 
-async function runBatch({ files, zone, mode, gpxPath, position, overwrite }, progress = () => {}) {
-  validateZone(zone);
+async function runBatch({ files, mode, gpxPath, position, selectedChoice }, progress = () => {}) {
   if (!files.length) throw new Error('请先选择照片。');
   if (!['gpx', 'manual'].includes(mode)) throw new Error('无效的处理模式。');
   let track;
@@ -82,18 +82,29 @@ async function runBatch({ files, zone, mode, gpxPath, position, overwrite }, pro
     try {
       if (!/\.(arw|jpe?g)$/i.test(file)) throw new Error('仅支持 ARW / JPEG。');
       const { tags, warning } = await readMetadata(file);
-      if (hasGps(tags) && !overwrite) result = { status: 'skipped', reason: '已有 GPS，未覆盖。' };
+      if (hasGps(tags)) result = { status: 'skipped', reason: '已有 GPS，保留原位置。' };
       else {
         let time, target;
         try {
-          time = photoTime(tags, zone);
-          target = mode === 'gpx' ? matchGpx(track, time.ns) : position;
+          const matches = locatePhoto(tags, track, position);
+          if (matches.length > 1 && !selectedChoice) {
+            result = { status: 'skipped', reason: '存在多个合理匹配，请选择后写入。', choices: matches.map(match => ({
+              ...match.position, zone: match.time.zone, offset: match.time.offset, utc: match.time.utc
+            })) };
+          } else {
+            const match = selectedChoice ? matches.find(match => match.time.utc === selectedChoice.utc
+              && match.time.zone === selectedChoice.zone && match.position.lat === selectedChoice.lat
+              && match.position.lon === selectedChoice.lon) : matches[0];
+            if (!match) throw new Error('所选匹配已不可用，请重新处理本批照片。');
+            time = match.time;
+            target = match.position;
+          }
         } catch (error) {
           result = { status: 'skipped', reason: error.message };
         }
         if (!result) {
           const writeWarning = await writeMetadata(file, target, time, mode);
-          result = { status: 'success', reason: `已写入 WGS84；拍摄时区 ${time.offset}${warning || writeWarning ? '；警告：' + [warning, writeWarning].filter(Boolean).join('；') : ''}` };
+          result = { status: 'success', reason: `已写入 WGS84；${time.zone} (${time.offset})${warning || writeWarning ? '；警告：' + [warning, writeWarning].filter(Boolean).join('；') : ''}` };
         }
       }
     } catch (error) { result = { status: 'failed', reason: error.message }; }
@@ -103,4 +114,4 @@ async function runBatch({ files, zone, mode, gpxPath, position, overwrite }, pro
   return { results, trackInfo: track ? `${track.pointCount} 个轨迹点，${track.segments.length} 个连续段；${track.missingTimes} 个无时间点已作为断点。` : null };
 }
 
-module.exports = { exiftool, readMetadata, writeMetadata, runBatch };
+module.exports = { exiftool, runBatch };

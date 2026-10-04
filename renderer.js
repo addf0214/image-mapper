@@ -3,6 +3,9 @@ const $ = id => document.getElementById(id);
 let map, marker, position = null, mapDisabled = false, processing = false;
 const mode = () => document.querySelector('input[name="mode"]:checked').value;
 const names = { success: '成功', skipped: '跳过', failed: '失败' };
+const batchResults = new Map();
+const thumbnails = new Map();
+let photoRevision = 0;
 
 function status(message, error = false) {
   $('status').textContent = message;
@@ -10,11 +13,119 @@ function status(message, error = false) {
 }
 
 function appendResult(result) {
+  batchResults.set(result.id, result);
   const li = document.createElement('li');
+  li.dataset.id = result.id;
   li.className = result.status;
   li.textContent = `${names[result.status]} · ${result.name} — ${result.reason}`;
   li.title = result.file;
+  if (result.choices) {
+    const row = document.createElement('div');
+    row.className = 'choice-row';
+    const select = document.createElement('select');
+    select.setAttribute('aria-label', `${result.name} 的匹配位置`);
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = '请选择一个匹配…';
+    select.append(placeholder);
+    result.choices.forEach((choice, index) => {
+      const option = document.createElement('option');
+      option.value = index;
+      option.textContent = `${choice.zone} (${choice.offset}) · ${choice.lat.toFixed(5)}, ${choice.lon.toFixed(5)} · UTC ${choice.utc}`;
+      select.append(option);
+    });
+    const button = document.createElement('button');
+    button.textContent = '采用此匹配';
+    button.type = 'button';
+    button.disabled = true;
+    select.addEventListener('change', () => { button.disabled = select.value === ''; });
+    button.addEventListener('click', async () => {
+      if (processing || select.value === '') return;
+      setProcessing(true);
+      status('正在写入所选匹配…');
+      try {
+        const updated = await api.resolveChoice({ id: result.id, index: Number(select.value) });
+        li.remove();
+        appendResult(updated);
+        showCounts();
+      } catch (error) { status(error.message, true); }
+      finally { setProcessing(false); }
+    });
+    row.append(select, button);
+    li.append(row);
+  }
   $('results').append(li);
+}
+
+function setProcessing(value) {
+  processing = value;
+  $('controls').disabled = value;
+  for (const control of document.querySelectorAll('.choice-row select, .choice-row button')) {
+    control.disabled = value || (control.tagName === 'BUTTON' && control.previousElementSibling.value === '');
+  }
+  if (marker) value ? marker.dragging.disable() : marker.dragging.enable();
+}
+
+function showCounts() {
+  const counts = { success: 0, skipped: 0, failed: 0 };
+  let unresolved = 0;
+  for (const result of batchResults.values()) {
+    counts[result.status]++;
+    if (result.choices) unresolved++;
+  }
+  status(`处理完成：成功 ${counts.success}，跳过 ${counts.skipped}，失败 ${counts.failed}${unresolved ? `；${unresolved} 张待选择匹配` : ''}`);
+}
+
+async function renderPhotos(files) {
+  const revision = ++photoRevision;
+  const selected = new Set(files.map(file => file.id));
+  for (const id of thumbnails.keys()) if (!selected.has(id)) thumbnails.delete(id);
+  $('photo-count').textContent = files.length ? `${files.length} 张已选` : '未选择';
+  $('photo-empty').hidden = files.length > 0;
+  $('photo-grid').replaceChildren();
+  const previews = new Map();
+  for (const file of files) {
+    const card = document.createElement('div');
+    card.className = 'photo-card';
+    const preview = document.createElement('div');
+    preview.className = 'photo-preview';
+    preview.textContent = '正在读取…';
+    previews.set(file.id, preview);
+    const caption = document.createElement('div');
+    caption.className = 'photo-caption';
+    const name = document.createElement('span');
+    name.textContent = file.name;
+    name.title = file.name;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'remove-photo';
+    remove.textContent = '×';
+    remove.title = `移除 ${file.name}`;
+    remove.setAttribute('aria-label', remove.title);
+    remove.addEventListener('click', async () => {
+      try { await renderPhotos(await api.removePhoto(file.id)); }
+      catch (error) { status(error.message, true); }
+    });
+    caption.append(name, remove);
+    card.append(preview, caption);
+    $('photo-grid').append(card);
+  }
+  for (const file of files) {
+    if (revision !== photoRevision) return;
+    const preview = previews.get(file.id);
+    try {
+      const source = thumbnails.get(file.id) || await api.photoThumbnail(file.id);
+      if (revision !== photoRevision) return;
+      thumbnails.set(file.id, source);
+      const image = document.createElement('img');
+      image.src = source;
+      image.alt = file.name;
+      preview.replaceChildren(image);
+    } catch (error) {
+      preview.textContent = '无可用缩略图';
+      preview.title = error.message;
+    }
+  }
 }
 
 function selectPoint(lat, lon, moveView = false) {
@@ -72,11 +183,11 @@ async function initMap() {
 }
 
 $('photos').addEventListener('click', async () => {
+  $('photos').disabled = true;
   try {
-    const files = await api.selectPhotos();
-    $('photo-count').textContent = files.length ? `${files.length} 张照片` : '未选择照片';
-    $('photo-list').replaceChildren(...files.map(name => { const li = document.createElement('li'); li.textContent = name; return li; }));
+    await renderPhotos(await api.selectPhotos());
   } catch (error) { status(error.message, true); }
+  finally { $('photos').disabled = false; }
 });
 $('gpx').addEventListener('click', async () => {
   try { $('gpx-name').textContent = (await api.selectGpx()) || '未选择轨迹'; }
@@ -132,9 +243,8 @@ api.onProgress(progress => {
 $('run').addEventListener('click', async () => {
   if (processing) return;
   if (mode() === 'manual' && !position) { status('请先指定地点。', true); return; }
-  processing = true;
-  $('controls').disabled = true;
-  marker?.dragging.disable();
+  setProcessing(true);
+  batchResults.clear();
   $('results').replaceChildren();
   $('summary').textContent = '';
   $('progress').hidden = false;
@@ -142,16 +252,12 @@ $('run').addEventListener('click', async () => {
   $('progress').max = 1;
   status('正在读取照片并写入…');
   try {
-    const output = await api.runBatch({ mode: mode(), zone: $('zone').value, overwrite: $('overwrite').checked, position });
-    const counts = { success: 0, skipped: 0, failed: 0 };
-    output.results.forEach(result => counts[result.status]++);
-    status(`处理完成：成功 ${counts.success}，跳过 ${counts.skipped}，失败 ${counts.failed}`);
+    const output = await api.runBatch({ mode: mode(), position });
+    showCounts();
     $('summary').textContent = output.trackInfo || '';
   } catch (error) { status(error.message, true); }
   finally {
-    processing = false;
-    $('controls').disabled = false;
-    marker?.dragging.enable();
+    setProcessing(false);
     $('progress').hidden = true;
   }
 });
