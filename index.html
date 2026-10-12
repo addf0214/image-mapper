@@ -17,9 +17,10 @@
       <div class="workspace">
       <section class="panel photos-panel">
         <div class="section-heading"><h2>照片</h2><strong id="photo-count">未选择</strong></div>
-        <button id="photos" type="button">添加照片</button>
+        <div class="photo-tools"><button id="photos" type="button">添加照片</button><button id="select-all" type="button">全选</button><button id="select-none" type="button">取消选择</button><button id="clear-photos" type="button">清空待处理列表</button></div>
         <p class="hint">相机时间应为拍摄地当地时间，应用自动补充时区。已有 GPS 的照片保留原位置。</p>
-        <div id="photo-empty">添加 ARW / JPEG 后，可在这里确认所选照片。</div>
+        <p class="hint">点击缩略图勾选。× 和清空仅移出列表，不删除文件。</p>
+        <div id="photo-empty">添加 ARW / JPEG 后，可在这里勾选要处理的照片。</div>
         <div id="photo-grid"></div>
       </section>
       <section class="panel location-panel">
@@ -37,9 +38,9 @@
         </div>
       </section>
       </div>
-      <div class="row action-row"><button id="run" type="button" class="primary">写入所选原文件</button><span class="hint">直接修改，不保留整份照片备份。</span></div>
+      <div class="row action-row"><button id="run" type="button" class="primary" disabled>写入选中的 0 张</button><span id="write-target" class="hint">直接修改所选原文件，不保留整份照片备份。</span></div>
     </fieldset>
-    <section class="panel results-panel" aria-live="polite"><p id="status">准备就绪</p><progress id="progress" value="0" max="1" hidden></progress><p id="summary"></p><ul id="results"></ul></section>
+    <section class="panel results-panel" aria-live="polite"><p id="status">准备就绪</p><progress id="progress" value="0" max="1" hidden></progress><p id="summary"></p><details id="result-details"><summary>最近一次处理详情</summary><ul id="results"></ul></details></section>
   </main>
 </body>
 </html>

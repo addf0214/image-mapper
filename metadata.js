@@ -82,7 +82,7 @@ async function runBatch({ files, mode, gpxPath, position, selectedChoice }, prog
     try {
       if (!/\.(arw|jpe?g)$/i.test(file)) throw new Error('仅支持 ARW / JPEG。');
       const { tags, warning } = await readMetadata(file);
-      if (hasGps(tags)) result = { status: 'skipped', reason: '已有 GPS，保留原位置。' };
+      if (hasGps(tags)) result = { status: 'skipped', reason: '已有 GPS，保留原位置。', alreadyLocated: true };
       else {
         let time, target;
         try {

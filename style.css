@@ -28,7 +28,17 @@ a { color: #2d654d; }
 #photo-empty { border: 1px dashed #cbd7cf; border-radius: 8px; padding: 42px 22px; text-align: center; color: #758077; font-size: 13px; }
 #photo-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-height: 530px; overflow-y: auto; }
 .photo-card { min-width: 0; border: 1px solid #dce3df; border-radius: 7px; overflow: hidden; }
-.photo-preview { aspect-ratio: 4 / 3; background: #f1f4f1; display: flex; align-items: center; justify-content: center; color: #758077; font-size: 12px; text-align: center; }
+.photo-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.photo-tools button { font-size: 12px; padding: 6px 10px; min-height: 34px; }
+.photo-card.selected { border-color: #2d654d; box-shadow: inset 0 0 0 1px #2d654d; }
+.photo-preview { width: 100%; padding: 0; border: 0; border-radius: 0; aspect-ratio: 4 / 3; background: #f1f4f1; display: flex; align-items: center; justify-content: center; color: #758077; font-size: 12px; text-align: center; white-space: normal; }
+.photo-preview:focus-visible { outline: 3px solid #2d654d; outline-offset: -3px; }
+.selection-mark { padding: 0 8px 8px; font-size: 12px; color: #65736c; }
+.selected .selection-mark { color: #2d654d; font-weight: 600; }
+.photo-result { margin: 0; padding: 0 8px 8px; font-size: 12px; overflow-wrap: anywhere; }
+.photo-card .choice-row { flex-direction: column; padding: 0 8px 8px; margin: 0; }
+.photo-card .choice-row select { flex: none; width: 100%; }
+.photo-card .choice-row button { white-space: normal; }
 .photo-preview img { width: 100%; height: 100%; object-fit: contain; }
 .photo-caption { padding: 8px; display: flex; gap: 6px; align-items: center; }
 .photo-caption span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; font-size: 12px; }
@@ -36,7 +46,9 @@ a { color: #2d654d; }
 .primary { color: white; background: #2d654d; border-color: #2d654d; font-weight: 600; }
 .primary:hover { background: #214e3a; }
 .action-row { margin: 20px 0; }
-.action-row .hint { margin: 0; }
+.action-row .hint { margin: 0; overflow-wrap: anywhere; }
+#result-details { margin-top: 12px; }
+#result-details summary { cursor: pointer; color: #65736c; }
 #map { height: 310px; border: 1px solid #dce3df; border-radius: 6px; }
 .coordinate-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; margin-top: 14px; }
 .coordinate-row label { display: grid; gap: 5px; font-size: 12px; color: #65736c; }

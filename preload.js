@@ -9,6 +9,8 @@ async function invoke(channel, value) {
 contextBridge.exposeInMainWorld('imageMapper', {
   selectPhotos: () => invoke('select-photos'),
   removePhoto: id => invoke('remove-photo', id),
+  clearPhotos: () => invoke('clear-photos'),
+  listPhotos: () => invoke('list-photos'),
   photoThumbnail: id => invoke('photo-thumbnail', id),
   selectGpx: () => invoke('select-gpx'),
   mapConfig: () => invoke('map-config'),

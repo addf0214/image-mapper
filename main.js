@@ -13,7 +13,17 @@ const userAgent = 'ImageMapper/1.0 (personal Windows photo geotagging)';
 let window, photos = [], gpxPath = null, busy = false, searching = false, lastSearch = 0;
 const searchCache = new Map();
 const pendingChoices = new Map();
-const photoList = () => photos.map(({ id, file }) => ({ id, name: path.basename(file) }));
+const photoList = () => photos.map(({ id, file, result }) => ({ id, name: path.basename(file), result }));
+
+function recordResult(photo, result, context) {
+  photo.result = result;
+  pendingChoices.delete(photo.id);
+  if (result.choices) pendingChoices.set(photo.id, { file: photo.file, context, choices: result.choices });
+}
+
+function removeCompleted() {
+  photos = photos.filter(photo => photo.result?.status !== 'success' && !photo.result?.alreadyLocated);
+}
 
 function handle(name, action) {
   ipcMain.handle(name, async (event, ...args) => {
@@ -33,7 +43,7 @@ handle('select-photos', async () => {
   });
   if (!result.canceled) {
     for (const file of result.filePaths) {
-      if (!photos.some(photo => photo.file === file)) photos.push({ id: randomUUID(), file });
+      if (!photos.some(photo => photo.file.toLowerCase() === file.toLowerCase())) photos.push({ id: randomUUID(), file });
     }
   }
   return photoList();
@@ -43,6 +53,13 @@ handle('remove-photo', id => {
   if (busy) throw new Error('正在处理照片，请等待完成。');
   photos = photos.filter(photo => photo.id !== id);
   pendingChoices.delete(id);
+  return photoList();
+});
+
+handle('clear-photos', () => {
+  if (busy) throw new Error('正在处理照片，请等待完成。');
+  photos = [];
+  pendingChoices.clear();
   return photoList();
 });
 
@@ -95,20 +112,23 @@ handle('search-place', async query => {
 
 handle('run-batch', async options => {
   if (busy) throw new Error('已有任务正在执行。');
+  if (!Array.isArray(options.ids) || !options.ids.length) throw new Error('请先勾选照片。');
+  const selected = photos.filter(photo => options.ids.includes(photo.id));
+  if (selected.length !== new Set(options.ids).size) throw new Error('所选照片已改变，请重新选择。');
   busy = true;
-  pendingChoices.clear();
   try {
-    const selected = [...photos];
     const context = { gpxPath, mode: options.mode, position: options.position };
     const output = await runBatch({ files: selected.map(photo => photo.file), ...context }, progress => {
       const photo = selected[progress.completed - 1];
       progress.result.id = photo.id;
-      if (progress.result.choices) pendingChoices.set(photo.id, { file: photo.file, context, choices: progress.result.choices });
+      recordResult(photo, progress.result, context);
       if (!window.isDestroyed()) window.webContents.send('batch-progress', progress);
     });
     return output;
-  } finally { busy = false; }
+  } finally { removeCompleted(); busy = false; }
 });
+
+handle('list-photos', () => photoList());
 
 handle('resolve-choice', async ({ id, index }) => {
   if (busy) throw new Error('已有任务正在执行。');
@@ -118,9 +138,10 @@ handle('resolve-choice', async ({ id, index }) => {
   try {
     const output = await runBatch({ files: [pending.file], ...pending.context, selectedChoice: pending.choices[index] });
     const result = { ...output.results[0], id };
-    pendingChoices.delete(id);
+    const photo = photos.find(photo => photo.id === id);
+    recordResult(photo, result, pending.context);
     return result;
-  } finally { busy = false; }
+  } finally { removeCompleted(); busy = false; }
 });
 
 app.whenReady().then(() => {
