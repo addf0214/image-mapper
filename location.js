@@ -55,7 +55,7 @@ function parseGpx(xml) {
   if (!parsed.gpx) throw new Error('文件不是 GPX。');
   const array = value => value == null ? [] : Array.isArray(value) ? value : [value];
   const segments = [];
-  let missingTimes = 0;
+  let missingTimes = 0, duplicatePoints = 0;
   for (const track of array(parsed.gpx.trk)) {
     for (const segment of array(track.trkseg)) {
       let run = [];
@@ -72,7 +72,13 @@ function parseGpx(xml) {
         try { ns = Temporal.Instant.from(time).epochNanoseconds; }
         catch { throw new Error(`GPX 轨迹时间无效：${time}`); }
         const position = coordinates(point['@_lat'], point['@_lon']);
-        if (run.length && ns <= run[run.length - 1].ns) throw new Error('GPX 同一轨迹段存在重复或倒序时间。');
+        const previous = run[run.length - 1];
+        if (previous && ns === previous.ns) {
+          if (position.lat !== previous.lat || position.lon !== previous.lon) throw new Error(`GPX 同一轨迹段在 ${time} 存在相同时间但不同位置的记录。`);
+          duplicatePoints++;
+          continue;
+        }
+        if (previous && ns < previous.ns) throw new Error(`GPX 同一轨迹段在 ${time} 存在倒序时间。`);
         run.push({ ...position, ns });
       }
       if (run.length) segments.push(run);
@@ -80,7 +86,7 @@ function parseGpx(xml) {
   }
   if (!segments.length) throw new Error('GPX 没有带有效时间的轨迹点（仅支持 trk/trkseg）。');
   const zones = [...new Set(segments.flatMap(segment => segment.flatMap(zonesAt)))];
-  return { segments, zones, missingTimes, pointCount: segments.reduce((n, s) => n + s.length, 0) };
+  return { segments, zones, missingTimes, duplicatePoints, pointCount: segments.reduce((n, s) => n + s.length, 0) };
 }
 
 function positionsAt(track, ns) {

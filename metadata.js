@@ -111,7 +111,7 @@ async function runBatch({ files, mode, gpxPath, position, selectedChoice }, prog
     results.push({ file, name: path.basename(file), ...result });
     progress({ completed: index + 1, total: files.length, result: results.at(-1) });
   }
-  return { results, trackInfo: track ? `${track.pointCount} 个轨迹点，${track.segments.length} 个连续段；${track.missingTimes} 个无时间点已作为断点。` : null };
+  return { results, trackInfo: track ? `${track.pointCount} 个轨迹点，${track.segments.length} 个连续段；${track.missingTimes} 个无时间点已作为断点；${track.duplicatePoints} 个同时间同位置重复点已合并。` : null };
 }
 
 module.exports = { exiftool, runBatch };
