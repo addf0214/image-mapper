@@ -1,6 +1,8 @@
 # Apple 照片时区判定问题：排查发现
 
-更新：2026-10-13。本文记录「相机 JPEG 经 image-mapper 定位后导入 iCloud / Apple 照片，时区被判成上海 +08、排序错乱」这一问题的完整排查过程、字段证据和结论，供决定是否修改写入逻辑时参考。
+更新：2026-10-13（当晚追加第八节）。本文记录「相机 JPEG 经 image-mapper 定位后导入 iCloud / Apple 照片，时区被判成上海 +08、排序错乱」这一问题的完整排查过程、字段证据和结论。
+
+**先读第八节的最终结论**：真正的决定变量是**导入通道**（Mac 本地导入 vs Windows→iCloud 同步），不是文件字段。第三~七节是推理轨迹，其中「补 OffsetTime 即可根治」的结论只在 Mac 本地导入下成立，在实际 Windows→iCloud 流程下不成立，已被第八节更新。image-mapper 的文件写入已正确且完整，无需再改。
 
 ## 一、现象
 
@@ -96,8 +98,67 @@ image-mapper 目前只写了 `OffsetTimeOriginal`——从 EXIF 标准角度这�
 - **`Software`**：相机 `ILCE-6300 v2.01`，iPhone `27.0`（iOS 版本）。无关。
 - **EXIF / 文件体积**：iPhone EXIF 889610 B（含大段 Apple MakerNotes 等），相机 EXIF 46968 B。体积差异与时区判定无关。
 
-## 七、现状结论
+## 七、现状结论（已被第八节更新，保留作推理轨迹）
 
 - image-mapper 的写入在 EXIF 标准意义上**正确且完整**，问题根源在 Apple 照片的时区解释逻辑。
 - 唯一有望从写入侧改善的着力点是第三节的假设（补写 `OffsetTime` / `OffsetTimeDigitized`），**但必须先按第五节实测确认 Apple 是否采信**，再决定是否改 `metadata.js`。
 - 若实测不认，则这是 Apple 侧问题，程序无解，只能导入后在 Apple 照片中批量校正。
+
+> ⚠️ 第三~七节「补 OffsetTime 即可根治」的结论**不完整，且在实际 Windows→iCloud 流程下不成立**。见第八节。它仅在「Mac 本地导入」这一条通道下成立。
+
+## 八、决定性更新：真正的变量是「导入通道」，不是文件字段（2026-10-13 当晚）
+
+第三节的实测（补 `OffsetTime` 后导入即判对）其实是用**单张文件、经某条通道**验证的，当时未控制「通过哪条通道导入」这个变量。后续在真实流程下复现失败，逼出了真正的根因。
+
+### 8.1 复现失败
+
+用**新版 image-mapper**（已写全三个 offset + `GPSAltitude`）处理整批 Sony JPEG，经**正常流程**（Windows 处理 → 复制进 Windows 版 iCloud → 自动同步到 Apple 照片）入库。抽查 `DSC06236.JPG`：
+
+- 文件经 exiftool **全量** dump（含 Sony MakerNotes、所有 IFD、Composite）确认：`OffsetTime/OffsetTimeOriginal/OffsetTimeDigitized` 全 `+09:00`，墙上时间 11:40:46，`GPSTimeStamp` 02:40:46Z，`GPSAltitude` 1388.4m，坐标在日光，`SonyDateTime` 也是 11:40:46。**文件三重时区线索齐全、全部正确、无任何矛盾或隐藏字段**（Sony `ZoneMatching: ISO Setting Used` 是白平衡/ISO 设置，非地理时区）。
+- 可文件进 Apple 后**仍被判成 China Standard Time / Shanghai (+08)**，与补 offset 之前一模一样。
+
+即「文件完全正确，照样判错」。
+
+### 8.2 决定性对照实验：同一文件，只换导入通道
+
+把**同一个** `DSC06236.JPG`（及后来整批 `photo_261001/`，37 张）**直接拖进 Mac 的「照片」App 本地导入**：
+
+- **一次判对**：Time Zone = Japan Standard Time / Imaichi，墙上时间 11:40（`DSC06211` 同样一次判对，11:10）。
+- Adjust 框里 `Original == Adjusted`、无「−1 hour」、`Revert` 置灰——Apple 认为「无需调整」。
+
+对比两条通道（文件逐字节相同、offset 相同）：
+
+| 入库通道 | 结果 |
+|---|---|
+| Windows 复制进 iCloud 文件夹 → 自动同步 | ❌ 判成上海 +08 |
+| Mac「照片」App 本地拖入 | ✅ 一次判对日本 +09 |
+
+**唯一变量是导入通道。** 结论随之修正：
+
+- **补 `OffsetTime` 本身是必要且正确的**（Mac 本地导入确实靠它一次判对），但**对 Windows→iCloud 通道无效**——该通道无视文件里全部三重时区线索（offset / GPS 时间戳 / GPS 坐标），直接套账户默认时区（上海）。
+- **根因在 Apple 的导入通道差异**：macOS 本地「照片」导入器会读 EXIF 时区并正确计算；iCloud（Windows 客户端 / 服务器侧）摄取管线不读，兜底账户时区。
+- 时区存在 Apple **图库数据库**（Mac 本地为 `Photos Library.photoslibrary` 内 SQLite 的时区偏移列；iCloud 为云端库），**不写回文件**。导入时钉死，之后不回看文件——所以改文件对已入库照片无效。
+
+### 8.3 `Revert` 现象（重要旁证）
+
+对一张被判成上海的照片（如 `DSC06233`，显示 10:38、Shanghai），在 Adjust 框：
+
+- `Original` 显示的是**正确的** 11:38（Apple 其实把墙上时间读对了，只是配了错时区显示成 10:38）。
+- **`Revert` 可点（非灰）**，而 iPhone 原生照片的 `Revert` 是**灰的**。
+
+这说明：Apple 认为这张照片**身上带着一个「它自己施加过的调整」**（把 +09 掰成 +08），该调整记录在 Apple 库里、不在文件里；`Revert` 能把显示改回正确，正是因为它撤销的就是这个 Apple 施加的错误调整。进一步印证「错误在 Apple 库的时区记录，不在文件」。
+
+### 8.4 已排除/确认无效的修复手段
+
+- **改 Windows 系统时区为 +9**：无效（判时区的代码在云端，不读 Windows 系统时区）。
+- **文件层面再加字段**：无从下手——文件已有 offset / GPS 时间戳 / GPS 坐标三条独立线索均指向 +09，该通道一条都不读。
+- **Apple 内批量 Revert**：不支持（无法批量）。
+- **Apple 内改 Closest City 为日本**：该下拉在当前照片上改不动。
+- **逐张 Revert**：有效但量大时不现实。
+- **Mac 本地重新导入**：✅ 有效（让 Apple 走会读 offset 的通道重算并覆盖库中时区）。但主力处理在 Windows，这不是可持续的「正经方案」。
+
+### 8.5 待办
+
+- 存量「已被判成上海」的照片：目前唯一可靠修复是让 Apple 走本地导入重算（Mac 拖入），逐张 Revert 太苦、批量手段均不可用。
+- 以后的新照片：需要一条「Windows 处理后仍能让 Apple 正确计算时区」的可持续入库通道，或确认这是 iCloud for Windows 的已知缺陷、据此调整处理流程。**下一步：联网检索该现象是否为已知 Apple/iCloud bug 及有无社区验证过的正经解法。**
+- image-mapper 本身**无需再改**——文件写入已正确且完整；此问题在 Apple 导入侧，非程序可控。
