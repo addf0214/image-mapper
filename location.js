@@ -89,7 +89,10 @@ function parseGpx(xml) {
           continue;
         }
         if (previous && ns < previous.ns) throw new Error(`GPX 同一轨迹段在 ${time} 存在倒序时间。`);
-        run.push({ ...position, ns });
+        // <ele> is optional per GPX; keep it only when it is a finite number.
+        const elevation = point.ele == null ? null : Number(String(point.ele).trim());
+        const ele = Number.isFinite(elevation) ? elevation : null;
+        run.push({ ...position, ns, ele });
       }
       if (run.length) segments.push(run);
     }
@@ -110,7 +113,7 @@ function positionsAt(track, ns) {
       else hi = mid;
     }
     const b = segment[lo];
-    if (b.ns === ns) { matches.push({ lat: b.lat, lon: b.lon }); continue; }
+    if (b.ns === ns) { matches.push({ lat: b.lat, lon: b.lon, ele: b.ele }); continue; }
     const a = segment[lo - 1];
     if (b.ns - a.ns > BigInt(MAX_GAP_SECONDS) * 1000000000n) continue;
     const ratio = Number(ns - a.ns) / Number(b.ns - a.ns);
@@ -119,7 +122,9 @@ function positionsAt(track, ns) {
     if (delta > 180) delta -= 360;
     if (delta < -180) delta += 360;
     const lon = ((a.lon + delta * ratio + 540) % 360) - 180;
-    matches.push({ lat: a.lat + (b.lat - a.lat) * ratio, lon });
+    // Interpolate elevation only when both endpoints have it; never extrapolate.
+    const ele = a.ele != null && b.ele != null ? a.ele + (b.ele - a.ele) * ratio : null;
+    matches.push({ lat: a.lat + (b.lat - a.lat) * ratio, lon, ele });
   }
   return matches;
 }

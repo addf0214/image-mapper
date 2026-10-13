@@ -66,6 +66,12 @@ async function writeMetadata(file, position, time, mode) {
     const utc = time.utc.replace(/Z$/, '');
     const [date, clock] = utc.split('T');
     args.push(`-EXIF:GPSDateStamp=${date.replaceAll('-', ':')}`, `-EXIF:GPSTimeStamp=${clock}`);
+    // GPX <ele> is a real GPS measurement, so record it; ref 0/1 = above/below
+    // sea level with the magnitude stored as a positive value. Manual mode has
+    // no real elevation and never reaches here with an ele.
+    if (position.ele != null) {
+      args.push(`-EXIF:GPSAltitude=${Math.abs(position.ele)}`, `-EXIF:GPSAltitudeRef=${position.ele < 0 ? 1 : 0}`);
+    }
   }
   args.push(file);
   const output = await exiftool(args);
