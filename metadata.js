@@ -54,7 +54,13 @@ async function writeMetadata(file, position, time, mode) {
     `-EXIF:GPSLongitude=${Math.abs(position.lon)}`,
     `-EXIF:GPSLongitudeRef=${position.lon < 0 ? 'W' : 'E'}`,
     '-EXIF:GPSMapDatum=WGS-84',
-    `-EXIF:OffsetTimeOriginal=${time.offset}`
+    // Apple Photos reads OffsetTime (tied to DateTime), not OffsetTimeOriginal,
+    // when deciding a photo's time zone; writing only OffsetTimeOriginal leaves
+    // it to fall back to the account default (e.g. Shanghai +08). Camera wall
+    // time is a single instant, so all three offsets take the same value.
+    `-EXIF:OffsetTimeOriginal=${time.offset}`,
+    `-EXIF:OffsetTime=${time.offset}`,
+    `-EXIF:OffsetTimeDigitized=${time.offset}`
   ];
   if (mode === 'gpx') {
     const utc = time.utc.replace(/Z$/, '');
