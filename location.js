@@ -32,9 +32,19 @@ function timesInZone(plain, zone) {
   return candidates;
 }
 
+const zoneCache = new Map();
+
 function zonesAt(position) {
-  const zones = findZones(position.lat, position.lon);
-  if (!zones.length) throw new Error('无法确定该地点的时区。');
+  // Cache by exact coordinate: locatePhoto re-checks the same candidate across
+  // its zone/time loops, and tracks repeat identical points, so the same lookup
+  // recurs. Exact key keeps the result identical to an uncached call.
+  const key = `${position.lat},${position.lon}`;
+  let zones = zoneCache.get(key);
+  if (!zones) {
+    zones = findZones(position.lat, position.lon);
+    if (!zones.length) throw new Error('无法确定该地点的时区。');
+    zoneCache.set(key, zones);
+  }
   return zones;
 }
 
